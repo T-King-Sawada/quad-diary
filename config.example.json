@@ -1,0 +1,16 @@
+{
+  "reminder_time": "18:30",
+  "popup_mode": "normal",
+  "max_snooze_count": 3,
+  "snooze_minutes": 10,
+  "autostart_enabled": false,
+  "confluence": {
+    "enabled": false,
+    "base_url": "https://your-domain.atlassian.net/wiki",
+    "space_id": "",
+    "parent_page_id": "",
+    "email": "",
+    "api_token": "",
+    "monthly_parent": false
+  }
+}
