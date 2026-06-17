@@ -200,15 +200,32 @@ API Token は Windows **資格情報マネージャー**（`DailyDiary`）に保
 多重起動防止により、`run.bat` を再実行しても新コードは読み込まれません。
 **必ずトレイ「終了」で完全終了してから起動し直してください。**
 
-## ビルド（配布用 .exe・予定）
+## ビルド（配布用 .exe）
 
 ```bat
-pyinstaller --noconsole --onefile --name DailyDiary main.py
+pip install pyinstaller   :: 初回のみ
+build.bat                 :: dist\DailyDiary.exe を生成
 ```
+
+`build.bat` は `--noconsole --onefile`、keyring の Windows バックエンドを
+hidden-import で同梱します。
+
+### 配布方法
+
+他PCへは次のフォルダ構成で渡します（`data/` `logs/` `config.json` は初回実行時に自動生成）。
+
+```
+DailyDiary/
+├─ DailyDiary.exe          ← dist から
+├─ config.default.json     ← 任意：管理者が接続先を事前設定する場合
+└─ README.md               ← 任意
+```
+
+利用者は `DailyDiary.exe` を実行 → 初回ウィザードで Email / API Token / Parent Page ID を入力。
 
 ## 開発ステータス
 
 - **Phase 1（完了）**：トレイ常駐 / 定時リマインダー / 4行入力 / JSONL保存 / 設定 / 自動起動
 - **Phase 2（完了）**：Force モード・スヌーズ・ログ・常時最前面・多重起動防止
 - **Phase 3（完了）**：Confluence 同期（接続テスト・作成/更新 upsert・失敗リトライ・月次親ページ自動作成）
-- **Phase 4（進行中）**：設定2層化・初回ウィザード・Credential Manager 済み／**PyInstaller .exe 化が残り**
+- **Phase 4（完了）**：設定2層化・初回ウィザード・Credential Manager・PyInstaller .exe 化
