@@ -11,7 +11,7 @@ import sys
 from datetime import date
 
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
+from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QSystemTrayIcon
 
 from app import autostart, config as config_mod, logger, storage
 from app.confluence_client import ConfluenceClient
@@ -289,6 +289,18 @@ def main() -> int:
     if single.is_already_running():
         log.info("既に起動済み。既存インスタンスに表示を依頼して終了します。")
         return 0
+
+    # 初回起動なら設定ウィザードを表示
+    if config_mod.is_first_run():
+        from app.first_run import FirstRunWizard
+
+        base_cfg = config_mod.load()  # 管理者デフォルト
+        wizard = FirstRunWizard(base_cfg)
+        if wizard.exec() == QDialog.Accepted:
+            config_mod.save(wizard.result_config())
+        else:
+            config_mod.save(base_cfg)  # スキップでも保存して次回からは初回扱いにしない
+        log.info("初回設定ウィザードを完了しました。")
 
     controller = AppController(app)
     single.activated.connect(controller.open_diary_manual)

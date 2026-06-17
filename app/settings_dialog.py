@@ -76,6 +76,7 @@ class SettingsDialog(QDialog):
         self.conf_base_url = QLineEdit(conf.get("base_url", ""))
         self.conf_space_id = QLineEdit(conf.get("space_id", ""))
         self.conf_parent_id = QLineEdit(conf.get("parent_page_id", ""))
+        self.conf_parent_id.setPlaceholderText("日記を置くページのID")
         self.conf_email = QLineEdit(conf.get("email", ""))
         self.conf_token = QLineEdit(conf.get("api_token", ""))
         self.conf_token.setEchoMode(QLineEdit.Password)
@@ -99,7 +100,7 @@ class SettingsDialog(QDialog):
         self.test_btn.clicked.connect(self._on_test)
         conf_form.addRow("", self.test_btn)
 
-        note = QLabel("※ 日記内容を Confluence に送信します。API Token は config.json に保存されます。")
+        note = QLabel("※ 日記内容を Confluence に送信します。API Token は Windows 資格情報マネージャーに保存されます。")
         note.setStyleSheet("color: gray;")
         note.setWordWrap(True)
         conf_form.addRow("", note)

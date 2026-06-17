@@ -36,6 +36,11 @@ class SyncResult:
     error: Optional[str] = None
 
 
+def _page_id(value) -> str:
+    """ページIDを数値部分だけに正規化（URL の "/slug" を除去）。"""
+    return str(value or "").strip().split("/")[0].strip()
+
+
 def render_storage_html(entry: dict) -> str:
     """Confluence storage format(HTML) を生成する（設計 F-101）。"""
     date = entry.get("date", "")
@@ -62,8 +67,8 @@ class ConfluenceClient:
         self.base_url = (base_url or "").rstrip("/")
         self.auth = HTTPBasicAuth(email, api_token)
         self.space_id = str(space_id or "").strip()
-        # 親ページIDは数値のみ（URL の "/2026" などが混ざっても先頭の数値を採用）
-        self.parent_page_id = str(parent_page_id or "").strip().split("/")[0].strip()
+        # ページIDは数値のみ（URL の "/2026" などが混ざっても先頭の数値を採用）
+        self.parent_page_id = _page_id(parent_page_id)
         self.monthly_parent = bool(monthly_parent)
         self._cloud_id: Optional[str] = None
 
@@ -160,6 +165,33 @@ class ConfluenceClient:
         log.info("親ページを作成しました: %s (id=%s)", title, page_id)
         return page_id
 
+    def _update_page(self, page_id: str, title: str, value: str) -> None:
+        """既存ページの本文を更新する（バージョンを +1）。"""
+        get = requests.get(
+            f"{self._api_root()}/api/v2/pages/{page_id}",
+            auth=self.auth,
+            headers={"Accept": "application/json"},
+            timeout=TIMEOUT,
+        )
+        get.raise_for_status()
+        current_version = get.json().get("version", {}).get("number", 1)
+
+        payload = {
+            "id": str(page_id),
+            "status": "current",
+            "title": title,
+            "body": {"representation": "storage", "value": value},
+            "version": {"number": current_version + 1},
+        }
+        put = requests.put(
+            f"{self._api_root()}/api/v2/pages/{page_id}",
+            json=payload,
+            auth=self.auth,
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            timeout=TIMEOUT,
+        )
+        put.raise_for_status()
+
     def _ensure_monthly_page(self, year_month: str) -> str:
         """年→月の2階層を保証し、月ページのIDを返す。
 
@@ -178,22 +210,32 @@ class ConfluenceClient:
         return month_id
 
     def create_diary_page(self, entry: dict) -> SyncResult:
+        """日記ページを作成、既に同名ページがあれば更新する（upsert）。"""
         title = f"4行日記 - {entry.get('date', '')}"
-        payload = {
-            "spaceId": self.space_id,
-            "status": "current",
-            "title": title,
-            "body": {
-                "representation": "storage",
-                "value": render_storage_html(entry),
-            },
-        }
+        value = render_storage_html(entry)
         try:
-            # 親ページの決定（月次自動 or 固定 or なし）
+            # 既存ページの特定：保存済みID → 無ければ同名タイトル検索
+            page_id = _page_id(entry.get("confluence_page_id") or "")
+            if not page_id:
+                page_id = self._find_page_by_title(title)
+
+            if page_id:
+                # 既存ページを更新（重複作成を回避）
+                self._update_page(page_id, title, value)
+                log.info("Confluence ページを更新しました: %s (id=%s)", title, page_id)
+                return SyncResult(ok=True, page_id=page_id)
+
+            # 新規作成（親ページを決定）
             if self.monthly_parent:
                 parent = self._ensure_monthly_page(entry.get("date", "")[:7])
             else:
                 parent = self.parent_page_id or None
+            payload = {
+                "spaceId": self.space_id,
+                "status": "current",
+                "title": title,
+                "body": {"representation": "storage", "value": value},
+            }
             if parent:
                 payload["parentId"] = parent
 
@@ -208,9 +250,9 @@ class ConfluenceClient:
                 timeout=TIMEOUT,
             )
             if r.status_code in (200, 201):
-                page_id = str(r.json().get("id"))
-                log.info("Confluence ページを作成しました: %s (id=%s)", title, page_id)
-                return SyncResult(ok=True, page_id=page_id)
+                new_id = str(r.json().get("id"))
+                log.info("Confluence ページを作成しました: %s (id=%s)", title, new_id)
+                return SyncResult(ok=True, page_id=new_id)
             msg = f"HTTP {r.status_code}: {r.text[:300]}"
             log.error("Confluence 同期失敗: %s", msg)
             return SyncResult(ok=False, error=msg)

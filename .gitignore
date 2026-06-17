@@ -1,6 +1,9 @@
 # --- 秘密情報・個人データ（絶対にコミットしない） ---
 config.json
 config.broken.*.json
+config.default.json
+config.bak*
+config.*.bak
 data/
 logs/
 
