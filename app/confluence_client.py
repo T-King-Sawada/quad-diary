@@ -165,17 +165,22 @@ class ConfluenceClient:
         log.info("親ページを作成しました: %s (id=%s)", title, page_id)
         return page_id
 
-    def _update_page(self, page_id: str, title: str, value: str) -> None:
-        """既存ページの本文を更新する（バージョンを +1）。"""
-        get = requests.get(
+    def _page_get(self, page_id: str) -> Optional[dict]:
+        """ページ情報を返す。404（削除済み等）なら None、その他のエラーは送出。"""
+        r = requests.get(
             f"{self._api_root()}/api/v2/pages/{page_id}",
             auth=self.auth,
             headers={"Accept": "application/json"},
             timeout=TIMEOUT,
         )
-        get.raise_for_status()
-        current_version = get.json().get("version", {}).get("number", 1)
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        return r.json()
 
+    def _update_page(self, page_id: str, current: dict, title: str, value: str) -> None:
+        """既存ページの本文を更新する（バージョンを +1）。"""
+        current_version = current.get("version", {}).get("number", 1)
         payload = {
             "id": str(page_id),
             "status": "current",
@@ -214,14 +219,17 @@ class ConfluenceClient:
         title = f"4行日記 - {entry.get('date', '')}"
         value = render_storage_html(entry)
         try:
-            # 既存ページの特定：保存済みID → 無ければ同名タイトル検索
+            # 既存ページの特定：保存済みID → 生存確認 → 死んでいれば同名タイトル検索
             page_id = _page_id(entry.get("confluence_page_id") or "")
-            if not page_id:
+            current = self._page_get(page_id) if page_id else None
+            if current is None:
+                # 保存済みIDが無い/削除済み → タイトルで再特定
                 page_id = self._find_page_by_title(title)
+                current = self._page_get(page_id) if page_id else None
 
-            if page_id:
+            if page_id and current is not None:
                 # 既存ページを更新（重複作成を回避）
-                self._update_page(page_id, title, value)
+                self._update_page(page_id, current, title, value)
                 log.info("Confluence ページを更新しました: %s (id=%s)", title, page_id)
                 return SyncResult(ok=True, page_id=page_id)
 
