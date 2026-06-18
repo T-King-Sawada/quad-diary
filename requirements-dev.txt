@@ -1,0 +1,4 @@
+# 開発・テスト用（実行時には不要）
+-r requirements.txt
+pytest
+pyinstaller

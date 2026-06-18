@@ -195,6 +195,17 @@ API Token は Windows **資格情報マネージャー**（`DailyDiary`）に保
 ├─ data/  logs/  config*.json  requirements.txt  run*.bat
 ```
 
+## テスト
+
+ロジック（reminder / config / storage / confluence_client）の自動テストがあります。
+
+```bat
+pip install -r requirements-dev.txt   :: 初回のみ
+"%USERPROFILE%\ddvenv\Scripts\python.exe" -m pytest
+```
+
+GUI（トレイ・ウィンドウ）は自動テスト対象外のため、手動確認で補完します。
+
 ## コード変更後の再起動ルール
 
 多重起動防止により、`run.bat` を再実行しても新コードは読み込まれません。

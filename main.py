@@ -193,8 +193,13 @@ class AppController:
         autostart_changed = new_config.get("autostart_enabled") != self.config.get(
             "autostart_enabled"
         )
+        time_changed = new_config.get("reminder_time") != self.config.get("reminder_time")
         self.config = new_config
         config_mod.save(self.config)
+
+        # リマインダー時刻が変わったら、その日の発火状態をリセットして再評価
+        if time_changed:
+            self.reminder.rearm()
 
         if autostart_changed:
             ok = autostart.apply(self.config.get("autostart_enabled", False))

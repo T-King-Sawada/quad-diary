@@ -66,6 +66,18 @@ class Reminder(QObject):
     def snooze_count(self) -> int:
         return self._snooze_count
 
+    def rearm(self) -> None:
+        """当日の発火状態をリセットし、新しい設定で再評価する。
+
+        設定でリマインダー時刻を変更したときに呼ぶ。既に本日分を保存済みなら
+        _tick 内の判定で発火しない（催促しない）。
+        """
+        self._triggered_date = None
+        self._handled_date = None
+        self._snooze_until = None
+        log.info("リマインダーを再武装しました（設定変更）。")
+        self._tick()
+
     def can_snooze(self, max_count: int) -> bool:
         return self._snooze_count < max_count
 
