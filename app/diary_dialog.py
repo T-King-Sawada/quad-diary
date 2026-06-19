@@ -86,11 +86,18 @@ class DiaryDialog(QDialog):
         snooze_enabled: bool,
         snooze_minutes: int,
     ) -> None:
+        self.update_mode(force, snooze_enabled, snooze_minutes)
+        for key, _, _ in FIELDS:
+            self._edits[key].setPlainText((existing or {}).get(key, "") or "")
+
+    def update_mode(self, force: bool, snooze_enabled: bool, snooze_minutes: int) -> None:
+        """入力内容には触れず、モード（Force/normal）と再通知ボタンだけ更新する。
+
+        表示中の窓に対して設定変更を反映するために使う。
+        """
         self._force = force
         self._snooze_minutes = snooze_minutes
         self._snooze_enabled = snooze_enabled
-        for key, _, _ in FIELDS:
-            self._edits[key].setPlainText((existing or {}).get(key, "") or "")
         self._snooze_btn.setText(f"{snooze_minutes}分後に再通知")
         self._snooze_btn.setEnabled(snooze_enabled)
         self._snooze_btn.setToolTip(

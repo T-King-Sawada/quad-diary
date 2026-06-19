@@ -201,6 +201,15 @@ class AppController:
         if time_changed:
             self.reminder.rearm()
 
+        # 日記ウィンドウ表示中なら、ポップアップ強度などの変更を即反映
+        if self.diary.isVisible():
+            max_snooze = int(self.config.get("max_snooze_count", 3))
+            self.diary.update_mode(
+                force=(self.config.get("popup_mode", "normal") == "force"),
+                snooze_enabled=self.reminder.can_snooze(max_snooze),
+                snooze_minutes=int(self.config.get("snooze_minutes", 10)),
+            )
+
         if autostart_changed:
             ok = autostart.apply(self.config.get("autostart_enabled", False))
             if not ok:
