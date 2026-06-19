@@ -28,3 +28,13 @@ def test_update_mode_snooze_button_disabled():
     d.prepare(None, force=False, snooze_enabled=True, snooze_minutes=10)
     d.update_mode(force=True, snooze_enabled=False, snooze_minutes=10)
     assert d._snooze_btn.isEnabled() is False
+
+
+def test_force_close_closes_even_in_force_mode():
+    """★回帰テスト：Forceモードでも force_close なら確認なしで閉じる（終了時用）。"""
+    d = DiaryDialog()
+    d.prepare(None, force=True, snooze_enabled=True, snooze_minutes=10)
+    d.show()
+    assert d.isVisible() is True
+    d.force_close()
+    assert d.isVisible() is False    # 確認ダイアログ無しで閉じる

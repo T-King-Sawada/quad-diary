@@ -248,6 +248,8 @@ class AppController:
     # ---------------- 終了 ----------------
     def quit(self) -> None:
         log.info("アプリを終了します。")
+        # 日記窓を確実に閉じる（Force モードでも確認なしで閉じる）
+        self.diary.force_close()
         # 実行中の同期スレッドの完了を少し待つ
         for w in list(self._sync_workers):
             w.wait(3000)

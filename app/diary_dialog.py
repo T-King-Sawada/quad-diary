@@ -44,6 +44,7 @@ class DiaryDialog(QDialog):
         self._force = False
         self._snooze_minutes = 10
         self._snooze_enabled = True
+        self._allow_close = False  # アプリ終了時のみ True にして強制クローズを許可
         self._edits: dict[str, QTextEdit] = {}
 
         self.setWindowTitle("今日の4行日記")
@@ -132,7 +133,17 @@ class DiaryDialog(QDialog):
         self.snoozed.emit(self._snooze_minutes)
         self.hide()
 
+    def force_close(self) -> None:
+        """アプリ終了時に、Force モードでも確認なしで確実に閉じる。"""
+        self._allow_close = True
+        self.close()
+
     def closeEvent(self, event) -> None:
+        # アプリ終了による強制クローズはそのまま閉じる
+        if self._allow_close:
+            event.accept()
+            return
+
         # × ボタン／キャンセルボタン経由。閉じずに隠して再利用する。
         event.ignore()
 
