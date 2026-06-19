@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from . import __version__
 from .confluence_client import ConfluenceClient
 
 
@@ -107,13 +108,16 @@ class SettingsDialog(QDialog):
 
         root.addWidget(group)
 
-        # --- ボタン ---
+        # --- ボタン（左下にバージョン表示） ---
         buttons = QHBoxLayout()
+        version_label = QLabel(f"v{__version__}")
+        version_label.setStyleSheet("color: gray;")
         save_btn = QPushButton("保存")
         save_btn.setDefault(True)
         save_btn.clicked.connect(self._on_save)
         cancel_btn = QPushButton("キャンセル")
         cancel_btn.clicked.connect(self.reject)
+        buttons.addWidget(version_label)
         buttons.addStretch(1)
         buttons.addWidget(save_btn)
         buttons.addWidget(cancel_btn)

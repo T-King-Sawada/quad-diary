@@ -1,1 +1,3 @@
-"""DailyDiary application package."""
+"""4行日記 application package."""
+
+__version__ = "1.1.1"
