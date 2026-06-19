@@ -10,6 +10,7 @@ from .logger import get_logger
 
 log = get_logger(__name__)
 
+# 旧名のまま維持（リネーム後も既存の保存トークンを引き継ぐため変更しない）
 SERVICE = "DailyDiary"
 ACCOUNT = "confluence_api_token"
 

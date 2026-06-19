@@ -1,4 +1,4 @@
-"""DailyDiary エントリポイント。
+"""QuadDiary（4行日記）エントリポイント。
 
 PySide6 のトレイ常駐アプリ。定刻に 4 行日記の入力を促し、本機（JSONL）へ保存する。
 Phase 1（本機 MVP）：トレイ常駐 / 定時リマインダー / 4 行入力 / JSONL 保存 /
@@ -266,7 +266,7 @@ class AppController:
         if show_diary:
             # 手動起動時は起動直後に日記を開く（イベントループ開始後に実行）
             QTimer.singleShot(0, self.open_diary_manual)
-        log.info("DailyDiary を起動しました（reminder_time=%s）。", self.config.get("reminder_time"))
+        log.info("QuadDiary を起動しました（reminder_time=%s）。", self.config.get("reminder_time"))
 
 
 def _install_excepthook() -> None:
@@ -293,7 +293,7 @@ def main() -> int:
     log.info("==== App start ====")
 
     app = QApplication(sys.argv)
-    app.setApplicationName("DailyDiary")
+    app.setApplicationName("QuadDiary")
     app.setQuitOnLastWindowClosed(False)  # 窓を閉じても常駐し続ける
 
     if not QSystemTrayIcon.isSystemTrayAvailable():

@@ -10,6 +10,7 @@ from .logger import get_logger
 
 log = get_logger(__name__)
 
+# 旧名のまま維持（リネーム後も既存の自動起動登録を壊さないため変更しない）
 APP_NAME = "DailyDiary"
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 

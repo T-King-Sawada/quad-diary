@@ -1,4 +1,4 @@
-# 4行日記 (DailyDiary)
+# 4行日記 (QuadDiary)
 
 毎日決まった時刻にポップアップで「4行日記」の入力を促す、Windows のシステムトレイ
 常駐アプリです。入力した日記は本機（ローカル）に保存し、任意で Confluence にも同期できます。
@@ -134,15 +134,15 @@ read:space:confluence
 
 ```
 4行日記/
-├─ DailyDiary.exe / main.py ...
+├─ QuadDiary.exe / main.py ...
 ├─ config.json        個人設定（差分のみ・非秘密）
 ├─ config.default.json 管理者デフォルト（任意・非秘密）
 ├─ data/              日記本体（diary_YYYY.jsonl）
 └─ logs/              app.log
 ```
 
-API Token は Windows **資格情報マネージャー**（`DailyDiary`）に保存され、ファイルには
-平文で残しません。
+API Token は Windows **資格情報マネージャー**（エントリ名 `DailyDiary` ※内部IDのため旧名を維持）
+に保存され、ファイルには平文で残しません。
 
 ## 8. 設定の優先順位（2層構成）
 
@@ -215,7 +215,7 @@ GUI（トレイ・ウィンドウ）は自動テスト対象外のため、手�
 
 ```bat
 pip install pyinstaller   :: 初回のみ
-build.bat                 :: dist\DailyDiary.exe を生成
+build.bat                 :: dist\QuadDiary.exe を生成
 ```
 
 `build.bat` は `--noconsole --onefile`、keyring の Windows バックエンドを
@@ -226,13 +226,13 @@ hidden-import で同梱します。
 他PCへは次のフォルダ構成で渡します（`data/` `logs/` `config.json` は初回実行時に自動生成）。
 
 ```
-DailyDiary/
-├─ DailyDiary.exe          ← dist から
+QuadDiary/
+├─ QuadDiary.exe          ← dist から
 ├─ config.default.json     ← 任意：管理者が接続先を事前設定する場合
 └─ README.md               ← 任意
 ```
 
-利用者は `DailyDiary.exe` を実行 → 初回ウィザードで Email / API Token / Parent Page ID を入力。
+利用者は `QuadDiary.exe` を実行 → 初回ウィザードで Email / API Token / Parent Page ID を入力。
 
 ## 開発ステータス
 
