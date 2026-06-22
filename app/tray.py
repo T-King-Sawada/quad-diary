@@ -5,6 +5,9 @@ from __future__ import annotations
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
 from .icon import app_icon
+from .toast import Toast
+
+NOTIFY_MSECS = 2000  # 通知の表示時間（約2秒で自動的に閉じる）
 
 
 class Tray(QSystemTrayIcon):
@@ -22,6 +25,8 @@ class Tray(QSystemTrayIcon):
         menu.addAction("終了", on_quit)
         self.setContextMenu(menu)
 
+        self._toast = Toast()
+
         # トレイアイコンのダブルクリックでも「今日を書く」
         self.activated.connect(
             lambda reason: on_write() if reason == QSystemTrayIcon.DoubleClick else None
@@ -31,4 +36,5 @@ class Tray(QSystemTrayIcon):
         self._sync_action.setEnabled(enabled)
 
     def notify(self, title: str, message: str) -> None:
-        self.showMessage(title, message, app_icon())
+        # OS標準通知は表示時間を制御できないため、自前トーストで約2秒だけ表示
+        self._toast.show_message(message, NOTIFY_MSECS)
