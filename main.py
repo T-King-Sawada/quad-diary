@@ -13,7 +13,7 @@ from datetime import date
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QSystemTrayIcon
 
-from app import autostart, config as config_mod, logger, storage
+from app import __version__, autostart, config as config_mod, logger, storage, updater
 from app.confluence_client import ConfluenceClient
 from app.diary_dialog import DiaryDialog
 from app.reminder import Reminder
@@ -51,7 +51,9 @@ class AppController:
             on_settings=self.open_settings,
             on_sync=self.on_sync,
             on_quit=self.quit,
+            on_check_update=self.on_check_update_manual,
         )
+        self._update_checker: updater.UpdateChecker | None = None
         self._refresh_tray_state()
         self.tray.show()
 
@@ -245,6 +247,46 @@ class AppController:
         self.tray.notify("4行日記", f"{len(pending)}件を同期しています…")
         self._start_sync(pending, announce=True)
 
+    # ---------------- 自動更新 ----------------
+    def on_check_update_manual(self) -> None:
+        self._start_update_check(manual=True)
+
+    def _start_update_check(self, manual: bool) -> None:
+        if self._update_checker is not None and self._update_checker.isRunning():
+            return
+        checker = updater.UpdateChecker()
+        checker.found.connect(lambda info: self._on_update_found(info, manual))
+        checker.none.connect(lambda: self._on_update_none(manual))
+        checker.finished.connect(lambda: setattr(self, "_update_checker", None))
+        self._update_checker = checker
+        checker.start()
+
+    def _on_update_none(self, manual: bool) -> None:
+        if manual:
+            self.tray.notify("4行日記", f"最新版です（v{__version__}）。")
+
+    def _on_update_found(self, info, manual: bool) -> None:
+        if not updater.can_self_update():
+            # スクリプト実行中は自動更新不可。案内のみ。
+            self.tray.notify(
+                "4行日記", f"新しいバージョン {info.version} があります（手動更新が必要）。"
+            )
+            return
+        ans = QMessageBox.question(
+            None,
+            "更新",
+            f"新しいバージョン {info.version} があります。\n今すぐ更新しますか？\n"
+            "（設定・日記データは保持されます）",
+        )
+        if ans == QMessageBox.Yes:
+            try:
+                updater.apply_update(info)
+            except Exception as e:  # noqa: BLE001
+                log.exception("更新の適用に失敗しました。")
+                QMessageBox.critical(None, "更新エラー", f"更新に失敗しました。\n{e}")
+                return
+            self.quit()
+
     # ---------------- 終了 ----------------
     def quit(self) -> None:
         log.info("アプリを終了します。")
@@ -266,6 +308,11 @@ class AppController:
         if show_diary:
             # 手動起動時は起動直後に日記を開く（イベントループ開始後に実行）
             QTimer.singleShot(0, self.open_diary_manual)
+
+        # 前回更新の残骸を掃除し、起動時に更新チェック（通知のみ・非ブロッキング）
+        updater.cleanup_old()
+        QTimer.singleShot(1500, lambda: self._start_update_check(manual=False))
+
         log.info("QuadDiary を起動しました（reminder_time=%s）。", self.config.get("reminder_time"))
 
 

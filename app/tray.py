@@ -8,7 +8,7 @@ from .icon import app_icon
 
 
 class Tray(QSystemTrayIcon):
-    def __init__(self, on_write, on_settings, on_sync, on_quit, parent=None):
+    def __init__(self, on_write, on_settings, on_sync, on_quit, on_check_update=None, parent=None):
         super().__init__(app_icon(), parent)
         self.setToolTip("4行日記")
 
@@ -16,6 +16,8 @@ class Tray(QSystemTrayIcon):
         menu.addAction("今日を書く", on_write)
         menu.addAction("設定", on_settings)
         self._sync_action = menu.addAction("同期する", on_sync)
+        if on_check_update is not None:
+            menu.addAction("更新を確認", on_check_update)
         menu.addSeparator()
         menu.addAction("終了", on_quit)
         self.setContextMenu(menu)
