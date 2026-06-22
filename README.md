@@ -135,16 +135,19 @@ read:space:confluence
 
 ## 7. データの保存場所
 
-実行フォルダ（または .exe と同じフォルダ）を基準に保存します。
+ユーザーデータは散らからないよう **1 フォルダに集約**されます。
 
 ```
-4行日記/
-├─ QuadDiary.exe / main.py ...
-├─ config.json        個人設定（差分のみ・非秘密）
-├─ config.default.json 管理者デフォルト（任意・非秘密）
-├─ data/              日記本体（diary_YYYY.jsonl）
-└─ logs/              app.log
+%APPDATA%\QuadDiary\        ← exe 実行時（どこに exe を置いても固定）
+├─ config.json              個人設定（差分のみ・非秘密）
+├─ data/                    日記本体（diary_YYYY.jsonl）
+└─ logs/                    app.log
 ```
+
+- exe をどこに置いても・移動・更新・再ビルドしても、データはこの 1 フォルダのまま。
+- 旧バージョン（exe の隣にデータを作る方式）からは、**初回起動時に自動移行**します。
+- 管理者デフォルト `config.default.json` は **exe と同じフォルダ**に置きます（配布物に同梱）。
+- 開発（`run.bat` のスクリプト実行）時は、従来どおりプロジェクト直下に保存します。
 
 API Token は Windows **資格情報マネージャー**（エントリ名 `DailyDiary` ※内部IDのため旧名を維持）
 に保存され、ファイルには平文で残しません。

@@ -67,7 +67,7 @@ def _deep_diff(full: dict, base: dict) -> dict:
 def managed_defaults() -> dict:
     """DEFAULT_CONFIG に config.default.json（あれば）を重ねた管理者デフォルト。"""
     merged = copy.deepcopy(DEFAULT_CONFIG)
-    path = paths.base_dir() / "config.default.json"
+    path = paths.default_config_path()
     if path.exists():
         try:
             with open(path, "r", encoding="utf-8") as f:

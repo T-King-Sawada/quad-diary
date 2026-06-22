@@ -375,6 +375,11 @@ def main() -> int:
         log.info("既に起動済み。既存インスタンスに表示を依頼して終了します。")
         return 0
 
+    # 旧レイアウト（exe 隣のデータ）を %APPDATA%\QuadDiary へ一度だけ移行
+    from app import paths
+
+    paths.migrate_legacy()
+
     # 初回起動なら設定ウィザードを表示
     if config_mod.is_first_run():
         from app.first_run import FirstRunWizard

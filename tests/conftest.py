@@ -38,7 +38,9 @@ def isolated_paths(tmp_path, monkeypatch):
     from app import paths
 
     monkeypatch.setattr(paths, "base_dir", lambda: tmp_path)
+    monkeypatch.setattr(paths, "exe_dir", lambda: tmp_path)
     monkeypatch.setattr(paths, "config_path", lambda: tmp_path / "config.json")
+    monkeypatch.setattr(paths, "default_config_path", lambda: tmp_path / "config.default.json")
     return tmp_path
 
 
