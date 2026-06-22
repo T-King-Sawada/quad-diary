@@ -5,6 +5,12 @@ from __future__ import annotations
 from app.diary_dialog import DiaryDialog
 
 
+def test_tab_changes_focus_on_all_fields():
+    """Tab で次の入力欄へ移動する設定になっていること。"""
+    d = DiaryDialog()
+    assert all(e.tabChangesFocus() for e in d._edits.values())
+
+
 def test_prepare_sets_force_and_fields():
     d = DiaryDialog()
     d.prepare({"fact": "A"}, force=True, snooze_enabled=True, snooze_minutes=10)

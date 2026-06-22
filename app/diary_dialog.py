@@ -60,6 +60,8 @@ class DiaryDialog(QDialog):
             edit.setPlaceholderText(placeholder)
             edit.setFixedHeight(60)
             edit.setAcceptRichText(False)
+            # Tab で次の欄、Shift+Tab で前の欄へ移動（タブ文字は挿入しない）
+            edit.setTabChangesFocus(True)
             self._edits[key] = edit
             layout.addWidget(edit)
 
