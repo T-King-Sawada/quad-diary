@@ -10,7 +10,6 @@ base_url は wiki を含む形を想定：
 from __future__ import annotations
 
 import html
-from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -19,6 +18,7 @@ from requests.auth import HTTPBasicAuth
 
 from .diary_dialog import FIELDS
 from .logger import get_logger
+from .providers.base import SyncProvider, SyncResult
 
 log = get_logger(__name__)
 
@@ -27,13 +27,6 @@ TIMEOUT = 20
 # スコープ付き API Token はサイト直 URL では 401 になり、この
 # ゲートウェイ + cloudId 経由でのみ Basic 認証が通る。
 GATEWAY = "https://api.atlassian.com/ex/confluence"
-
-
-@dataclass
-class SyncResult:
-    ok: bool
-    page_id: Optional[str] = None
-    error: Optional[str] = None
 
 
 def _page_id(value) -> str:
@@ -54,7 +47,10 @@ def render_storage_html(entry: dict) -> str:
     return "\n".join(parts)
 
 
-class ConfluenceClient:
+class ConfluenceClient(SyncProvider):
+    KEY = "confluence"
+    LABEL = "Confluence"
+
     def __init__(
         self,
         base_url: str,
@@ -213,6 +209,10 @@ class ConfluenceClient:
         if not month_id:
             month_id = self._create_page(year_month, year_id)
         return month_id
+
+    def upsert_entry(self, entry: dict) -> SyncResult:
+        """SyncProvider インターフェイス：日記を作成/更新する。"""
+        return self.create_diary_page(entry)
 
     def create_diary_page(self, entry: dict) -> SyncResult:
         """日記ページを作成、既に同名ページがあれば更新する（upsert）。"""

@@ -13,8 +13,15 @@ from datetime import date
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QSystemTrayIcon
 
-from app import __version__, autostart, config as config_mod, logger, storage, updater
-from app.confluence_client import ConfluenceClient
+from app import (
+    __version__,
+    autostart,
+    config as config_mod,
+    logger,
+    providers as providers_mod,
+    storage,
+    updater,
+)
 from app.diary_dialog import DiaryDialog
 from app.reminder import Reminder
 from app.settings_dialog import SettingsDialog
@@ -122,13 +129,13 @@ class AppController:
 
     def _save_entry(self, today: str, values, existing) -> None:
         fact, discovery, lesson, declaration = values
-        conf_enabled = bool(self.config.get("confluence", {}).get("enabled", False))
+        sync_on = bool(providers_mod.enabled_providers(self.config))
         try:
             entry = storage.new_entry(
                 today, fact, discovery, lesson, declaration, existing=existing
             )
             # 同期有効なら pending、無効なら none（設計 12.2）
-            entry["sync_status"] = "pending" if conf_enabled else "none"
+            entry["sync_status"] = "pending" if sync_on else "none"
             # まず本機保存（設計 6.4：先に本機、後で同期）
             storage.save_entry(entry)
             self.reminder.mark_done()
@@ -140,26 +147,30 @@ class AppController:
             )
             return
 
-        if conf_enabled:
+        if sync_on:
             self._start_sync([entry], announce=False)
 
-    # ---------------- Confluence 同期 ----------------
+    # ---------------- 同期（プロバイダ非依存） ----------------
     def _start_sync(self, entries: list[dict], announce: bool) -> None:
-        client = ConfluenceClient.from_config(self.config)
-        if client is None:
-            log.warning("Confluence 設定が不完全なため同期をスキップします。")
+        providers = providers_mod.enabled_providers(self.config)
+        if not providers:
+            log.warning("有効な同期先が無いため同期をスキップします。")
+            if announce:
+                self.tray.notify("4行日記", "同期先が設定されていません。")
             return
         if not entries:
             if announce:
                 self.tray.notify("4行日記", "同期対象はありません。")
             return
 
-        worker = SyncWorker(client, entries)
-        worker.one_done.connect(self._on_sync_one)
-        worker.all_done.connect(self._on_sync_all)
-        worker.finished.connect(lambda: self._sync_workers.discard(worker))
-        self._sync_workers.add(worker)
-        worker.start()
+        # 現状プロバイダは1つ（Confluence）。複数時は各プロバイダごとに worker を起動。
+        for provider in providers:
+            worker = SyncWorker(provider, entries)
+            worker.one_done.connect(self._on_sync_one)
+            worker.all_done.connect(self._on_sync_all)
+            worker.finished.connect(lambda w=worker: self._sync_workers.discard(w))
+            self._sync_workers.add(worker)
+            worker.start()
 
     def _on_sync_one(self, entry: dict, result) -> None:
         if result.ok:
@@ -176,7 +187,7 @@ class AppController:
 
     def _on_sync_all(self, success: int, total: int) -> None:
         if success == total:
-            self.tray.notify("4行日記", f"Confluence へ同期しました（{success}件）。")
+            self.tray.notify("4行日記", f"同期しました（{success}件）。")
         else:
             failed = total - success
             self.tray.notify(
@@ -223,9 +234,7 @@ class AppController:
         log.info("設定を更新しました。")
 
     def _refresh_tray_state(self) -> None:
-        self.tray.set_sync_enabled(
-            bool(self.config.get("confluence", {}).get("enabled", False))
-        )
+        self.tray.set_sync_enabled(bool(providers_mod.enabled_providers(self.config)))
 
     def _sync_autostart_state(self) -> None:
         """config と実レジストリの自動起動状態を一致させる。"""
@@ -235,9 +244,9 @@ class AppController:
 
     # ---------------- 同期（手動リトライ） ----------------
     def on_sync(self) -> None:
-        if not self.config.get("confluence", {}).get("enabled", False):
+        if not providers_mod.enabled_providers(self.config):
             QMessageBox.information(
-                None, "同期", "Confluence 同期が無効です。設定で有効にしてください。"
+                None, "同期", "同期先が無効です。設定で有効にしてください。"
             )
             return
         pending = storage.unsynced_entries()

@@ -68,8 +68,12 @@ python -m venv "%USERPROFILE%\ddvenv"
 |----------|------|
 | **今日を書く** | 4行日記の入力画面を開く（保存済みなら内容が入った状態で開く）|
 | **設定** | リマインダー時刻・ポップアップ強度・Confluence などを設定 |
-| **同期する** | 未同期（pending/failed）の日記を Confluence へ再送 |
+| **同期する** | 未同期（pending/failed）の日記を同期先へ再送 |
+| **更新を確認** | 最新版があれば確認のうえ自動更新 |
 | **終了** | アプリを終了 |
+
+起動時にも自動で更新を確認し、新しい版があれば「更新しますか？」と尋ねます
+（設定・日記データ・保存済みトークンは保持されます）。
 
 - 設定時刻になると、その日まだ未入力なら入力画面が自動で開きます。
 - 入力画面は常に最前面に表示されます。
@@ -184,8 +188,10 @@ API Token は Windows **資格情報マネージャー**（エントリ名 `Dail
 │  ├─ settings_dialog.py    設定画面（接続テスト付き）
 │  ├─ first_run.py          初回設定ウィザード
 │  ├─ storage.py            JSONL 保存（年別・同日 upsert）
-│  ├─ confluence_client.py  Confluence v2 API（gateway 経由・upsert・月次親）
-│  ├─ sync_worker.py        同期をバックグラウンドスレッドで実行
+│  ├─ providers/            同期先プロバイダの共通IF（base.py）とレジストリ
+│  ├─ confluence_client.py  Confluence プロバイダ（v2 API・gateway 経由・upsert・月次親）
+│  ├─ sync_worker.py        同期をバックグラウンドスレッドで実行（プロバイダ非依存）
+│  ├─ updater.py            GitHub リリースからの自動更新
 │  ├─ secrets_store.py      API Token を資格情報マネージャーへ（keyring）
 │  ├─ config.py             2層設定の読み書き（差分保存・トークン注入）
 │  ├─ single_instance.py    多重起動防止（QLocalServer）
@@ -206,6 +212,14 @@ pip install -r requirements-dev.txt   :: 初回のみ
 ```
 
 GUI（トレイ・ウィンドウ）は自動テスト対象外のため、手動確認で補完します。
+
+## 同期先プロバイダの追加
+
+連携先は `app/providers/base.py` の `SyncProvider` インターフェイス
+（`test_connection` / `upsert_entry`）で抽象化されています。Notion / Google Docs
+などを追加する場合は、`SyncProvider` を実装したクラスを作り、
+`app/providers/__init__.py` の `_provider_classes()` に登録すれば、同期処理は
+そのまま新プロバイダにも適用されます（設定UIは各プロバイダ用に追加）。
 
 ## コード変更後の再起動ルール
 
