@@ -87,6 +87,7 @@ python -m venv "%USERPROFILE%\ddvenv"
 ## 6. Confluence 同期の設定
 
 日記ページを Confluence に1日1ページずつ作成（既存なら更新）できます。
+（Confluence は連携先の一例です。将来的に Notion / Google Docs などへの対応も検討しています。）
 
 ### 6-1. API Token を発行
 
@@ -240,3 +241,14 @@ QuadDiary/
 - **Phase 2（完了）**：Force モード・スヌーズ・ログ・常時最前面・多重起動防止
 - **Phase 3（完了）**：Confluence 同期（接続テスト・作成/更新 upsert・失敗リトライ・月次親ページ自動作成）
 - **Phase 4（完了）**：設定2層化・初回ウィザード・Credential Manager・PyInstaller .exe 化
+
+## ライセンス
+
+[MIT License](LICENSE) で公開しています。自由に利用・改変・再配布できます。
+
+### サードパーティ
+
+- [PySide6 (Qt for Python)](https://www.qt.io/qt-for-python) — **LGPLv3**。本アプリは PySide6 を利用しています。
+  配布する `.exe` には Qt のライブラリが同梱されます。LGPL の条件（ライブラリ差し替えの自由など）に従ってください。
+- [requests](https://requests.readthedocs.io/) — Apache-2.0
+- [keyring](https://github.com/jaraco/keyring) — MIT
