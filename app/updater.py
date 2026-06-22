@@ -55,6 +55,7 @@ def is_newer(latest: str, current: str) -> bool:
 class UpdateInfo:
     version: str
     url: str
+    size: int = 0  # 期待ファイルサイズ（bytes）。0 は不明
 
 
 def check_for_update() -> Optional[UpdateInfo]:
@@ -74,7 +75,11 @@ def check_for_update() -> Optional[UpdateInfo]:
             return None
         for asset in data.get("assets", []):
             if asset.get("name") == ASSET_NAME:
-                return UpdateInfo(version=tag, url=asset.get("browser_download_url", ""))
+                return UpdateInfo(
+                    version=tag,
+                    url=asset.get("browser_download_url", ""),
+                    size=int(asset.get("size", 0) or 0),
+                )
         log.warning("更新チェック: 資産 %s が見つかりません。", ASSET_NAME)
         return None
     except (requests.RequestException, ValueError) as e:
@@ -100,13 +105,20 @@ def cleanup_old() -> None:
             pass  # まだ使用中等。次回再試行
 
 
-def _download(url: str, dest: Path) -> None:
+def _download(url: str, dest: Path, expected_size: int = 0) -> None:
     with requests.get(url, stream=True, timeout=120) as r:
         r.raise_for_status()
         with open(dest, "wb") as f:
             for chunk in r.iter_content(8192):
                 if chunk:
                     f.write(chunk)
+    # 不完全ダウンロード検出：壊れた exe を入れ替えてしまう事故を防ぐ
+    if expected_size:
+        actual = dest.stat().st_size
+        if actual != expected_size:
+            raise OSError(
+                f"ダウンロードが不完全です（{actual}/{expected_size} bytes）。更新を中止します。"
+            )
 
 
 def _swap_script(exe: Path, new: Path, pid: int) -> Path:
@@ -137,7 +149,16 @@ def apply_update(info: UpdateInfo) -> None:
     exe = Path(sys.executable)
     new = exe.with_name(exe.stem + ".new.exe")
     log.info("更新をダウンロード中: %s", info.version)
-    _download(info.url, new)
+    try:
+        _download(info.url, new, info.size)
+    except Exception:
+        # 不完全/失敗時は部分ファイルを消し、入れ替えはしない（古いexeを維持）
+        try:
+            if new.exists():
+                new.unlink()
+        except OSError:
+            pass
+        raise
     import os
 
     bat = _swap_script(exe, new, os.getpid())

@@ -35,8 +35,8 @@ def test_check_for_update_found(monkeypatch):
     payload = {
         "tag_name": "v1.3.0",
         "assets": [
-            {"name": "other.txt", "browser_download_url": "x"},
-            {"name": "QuadDiary.exe", "browser_download_url": "https://dl/QuadDiary.exe"},
+            {"name": "other.txt", "browser_download_url": "x", "size": 1},
+            {"name": "QuadDiary.exe", "browser_download_url": "https://dl/QuadDiary.exe", "size": 12345},
         ],
     }
     monkeypatch.setattr(updater.requests, "get", lambda *a, **k: FakeResp(200, payload))
@@ -44,6 +44,34 @@ def test_check_for_update_found(monkeypatch):
     assert info is not None
     assert info.version == "v1.3.0"
     assert info.url == "https://dl/QuadDiary.exe"
+    assert info.size == 12345
+
+
+def test_download_rejects_incomplete(tmp_path, monkeypatch):
+    """サイズ不一致（途中で切れたDL）は OSError で弾き、壊れたexeを入れない。"""
+
+    class StreamResp:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def iter_content(self, n):
+            yield b"only-a-few-bytes"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(updater.requests, "get", lambda *a, **k: StreamResp())
+    dest = tmp_path / "QuadDiary.new.exe"
+    try:
+        updater._download("https://dl/QuadDiary.exe", dest, expected_size=99999)
+        assert False, "should raise on size mismatch"
+    except OSError:
+        pass
 
 
 def test_check_for_update_up_to_date(monkeypatch):
