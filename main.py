@@ -229,6 +229,15 @@ class AppController:
                 QMessageBox.warning(
                     None, "自動起動", "自動起動設定の変更に失敗しました。ログを確認してください。"
                 )
+            elif self.config.get("autostart_enabled", False) and not autostart.is_reliable():
+                # Store版Python（スクリプト実行）はレジストリ仮想化で効かない
+                QMessageBox.warning(
+                    None,
+                    "自動起動",
+                    "スクリプト実行（Microsoft Store 版 Python）では、レジストリの仮想化により\n"
+                    "自動起動が実際には有効になりません。\n"
+                    "配布用の QuadDiary.exe から有効にしてください。",
+                )
 
         self._refresh_tray_state()
         log.info("設定を更新しました。")
@@ -237,10 +246,14 @@ class AppController:
         self.tray.set_sync_enabled(bool(providers_mod.enabled_providers(self.config)))
 
     def _sync_autostart_state(self) -> None:
-        """config と実レジストリの自動起動状態を一致させる。"""
-        want = bool(self.config.get("autostart_enabled", False))
-        if want != autostart.is_enabled():
-            autostart.apply(want)
+        """config が有効なときだけ自動起動の登録を保証する（自己修復）。
+
+        注意：起動時に自動で *無効化* はしない。さもないと、別の（autostart 無効な）
+        config を持つインスタンスが起動しただけで登録が消えてしまう。
+        無効化はユーザーが設定でチェックを外したときのみ行う。
+        """
+        if self.config.get("autostart_enabled", False) and not autostart.is_enabled():
+            autostart.enable()
 
     # ---------------- 同期（手動リトライ） ----------------
     def on_sync(self) -> None:

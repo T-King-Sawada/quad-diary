@@ -26,6 +26,19 @@ def _command() -> str:
     return f'"{runtime}" "{main_py}"'
 
 
+def is_reliable() -> bool:
+    """この実行形態でレジストリ自動起動が確実に効くか。
+
+    PyInstaller の .exe は通常プロセスなので確実。一方 Microsoft Store 版 Python
+    （スクリプト実行）はレジストリ仮想化により本物の HKCU\\...\\Run に書けず、
+    Windows ログオン時の自動起動が効かない。
+    """
+    if getattr(sys, "frozen", False):
+        return True
+    base = (sys.base_prefix or "").lower()
+    return ("windowsapps" not in base) and ("pythonsoftwarefoundation" not in base)
+
+
 def is_enabled() -> bool:
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
