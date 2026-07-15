@@ -8,7 +8,7 @@ Phase 1（本機 MVP）：トレイ常駐 / 定時リマインダー / 4 行入�
 from __future__ import annotations
 
 import sys
-from datetime import date
+from datetime import date, timedelta
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QSystemTrayIcon
@@ -85,6 +85,10 @@ class AppController:
         today = storage.today_str()
         existing = storage.get_entry(today)
 
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        yesterday_entry = storage.get_entry(yesterday)
+        yesterday_declaration = (yesterday_entry or {}).get("declaration", "") or ""
+
         # F-103：定刻発火で既に保存済みなら再編集確認
         if reason == "reminder" and existing is not None:
             self._prompting = True
@@ -111,6 +115,7 @@ class AppController:
             force=(mode == "force"),
             snooze_enabled=self.reminder.can_snooze(max_snooze),
             snooze_minutes=snooze_minutes,
+            yesterday_declaration=yesterday_declaration,
         )
         self.diary.show()
         self.diary.bring_to_front()

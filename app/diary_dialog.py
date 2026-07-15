@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -32,6 +33,24 @@ FIELDS = [
     ("lesson", "教訓", "今日得た教訓"),
     ("declaration", "宣言", "明日からの行動宣言"),
 ]
+
+
+class _AutoJumpTextEdit(QTextEdit):
+    """最終行で下矢印キーを押すと文末へジャンプする QTextEdit。
+
+    標準の QTextEdit は最終行で下矢印を押しても何も起きない（移動先の行がないため）。
+    一般的な Web／アプリの入力欄の挙動に合わせ、その場合は文末へカーソルを移動する。
+    """
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key_Down and event.modifiers() == Qt.NoModifier:
+            cursor = self.textCursor()
+            probe = QTextCursor(cursor)
+            if not probe.movePosition(QTextCursor.MoveOperation.Down):
+                cursor.movePosition(QTextCursor.MoveOperation.End)
+                self.setTextCursor(cursor)
+                return
+        super().keyPressEvent(event)
 
 
 class DiaryDialog(QDialog):
@@ -54,9 +73,19 @@ class DiaryDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
+        self._yesterday_label = QLabel()
+        self._yesterday_label.setWordWrap(True)
+        self._yesterday_label.setStyleSheet(
+            "color: #5c4400; background-color: #fff3cd; padding: 6px; border-radius: 4px;"
+        )
+        self._yesterday_label.setVisible(False)
+
         for key, label, placeholder in FIELDS:
+            if key == "declaration":
+                # 「宣言」欄の直前に、昨日の宣言（=今日やるはずだったこと）を表示する
+                layout.addWidget(self._yesterday_label)
             layout.addWidget(QLabel(label))
-            edit = QTextEdit()
+            edit = _AutoJumpTextEdit()
             edit.setPlaceholderText(placeholder)
             edit.setFixedHeight(60)
             edit.setAcceptRichText(False)
@@ -88,10 +117,17 @@ class DiaryDialog(QDialog):
         force: bool,
         snooze_enabled: bool,
         snooze_minutes: int,
+        yesterday_declaration: str = "",
     ) -> None:
         self.update_mode(force, snooze_enabled, snooze_minutes)
         for key, _, _ in FIELDS:
             self._edits[key].setPlainText((existing or {}).get(key, "") or "")
+
+        if yesterday_declaration:
+            self._yesterday_label.setText(f"昨日の宣言：{yesterday_declaration}")
+            self._yesterday_label.setVisible(True)
+        else:
+            self._yesterday_label.setVisible(False)
 
     def update_mode(self, force: bool, snooze_enabled: bool, snooze_minutes: int) -> None:
         """入力内容には触れず、モード（Force/normal）と再通知ボタンだけ更新する。

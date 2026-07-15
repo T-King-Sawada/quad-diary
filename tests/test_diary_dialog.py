@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QTextCursor
+
 from app.diary_dialog import DiaryDialog
 
 
@@ -34,6 +37,56 @@ def test_update_mode_snooze_button_disabled():
     d.prepare(None, force=False, snooze_enabled=True, snooze_minutes=10)
     d.update_mode(force=True, snooze_enabled=False, snooze_minutes=10)
     assert d._snooze_btn.isEnabled() is False
+
+
+def test_prepare_shows_yesterday_declaration():
+    d = DiaryDialog()
+    d.prepare(None, force=False, snooze_enabled=True, snooze_minutes=10, yesterday_declaration="早起きする")
+    assert d._yesterday_label.isHidden() is False
+    assert "早起きする" in d._yesterday_label.text()
+
+
+def test_prepare_hides_yesterday_label_when_no_declaration():
+    d = DiaryDialog()
+    d.prepare(None, force=False, snooze_enabled=True, snooze_minutes=10, yesterday_declaration="")
+    assert d._yesterday_label.isHidden() is True
+
+
+def test_down_arrow_jumps_to_end_on_last_line():
+    """★回帰テスト：最終行（かつ行末より手前）で下矢印を押すと文末へジャンプする。"""
+    d = DiaryDialog()
+    edit = d._edits["fact"]
+    edit.setPlainText("1行目\n2行目")
+    cursor = edit.textCursor()
+    cursor.movePosition(QTextCursor.MoveOperation.End)
+    cursor.movePosition(QTextCursor.MoveOperation.StartOfLine)  # 最終行の先頭へ
+    edit.setTextCursor(cursor)
+
+    edit.keyPressEvent(_make_key_event(Qt.Key_Down))
+
+    assert edit.textCursor().position() == len(edit.toPlainText())
+
+
+def test_down_arrow_moves_to_next_line_when_not_last():
+    """下矢印の通常動作（次の行がある場合）は維持される。"""
+    d = DiaryDialog()
+    edit = d._edits["fact"]
+    edit.setPlainText("1行目\n2行目")
+    cursor = edit.textCursor()
+    cursor.movePosition(QTextCursor.MoveOperation.Start)
+    edit.setTextCursor(cursor)  # 1行目の先頭
+
+    edit.keyPressEvent(_make_key_event(Qt.Key_Down))
+
+    assert edit.textCursor().position() != len(edit.toPlainText())
+    assert edit.textCursor().blockNumber() == 1
+
+
+def _make_key_event(key):
+    from PySide6.QtGui import QKeyEvent
+    from PySide6.QtCore import QEvent
+
+    return QKeyEvent(QEvent.Type.KeyPress, key, Qt.NoModifier)
 
 
 def test_force_close_closes_even_in_force_mode():
