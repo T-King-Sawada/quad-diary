@@ -34,6 +34,16 @@ def _page_id(value) -> str:
     return str(value or "").strip().split("/")[0].strip()
 
 
+#: 検証結果の表示名
+_REVIEW_LABELS = {
+    "done": "できた",
+    "dropped": "降りた",
+    "pending": "あとで",
+    "shelved": "保留",
+    "superseded": "再宣言",
+}
+
+
 def render_storage_html(entry: dict) -> str:
     """Confluence storage format(HTML) を生成する（設計 F-101）。"""
     date = entry.get("date", "")
@@ -44,6 +54,35 @@ def render_storage_html(entry: dict) -> str:
         body = html.escape(text).replace("\n", "<br/>")
         parts.append(f"<h2>{html.escape(label)}</h2>")
         parts.append(f"<p>{body}</p>")
+
+    # 追記ブロック（思考 / タネ）。月次のまとめ出力でも拾えるよう見出しを分ける。
+    for kind, label in (("thought", "思考"), ("seed", "タネ")):
+        blocks = [b for b in (entry.get("entries") or []) if b.get("type") == kind]
+        if not blocks:
+            continue
+        parts.append(f"<h2>{html.escape(label)}</h2>")
+        for block in blocks:
+            body = html.escape(str(block.get("body", ""))).replace("\n", "<br/>")
+            parts.append(f"<p>{body}</p>")
+
+    # 過去の宣言への応答は、応答した日のページに載せる（古いページは再同期しない）
+    reviews = entry.get("reviews") or []
+    if reviews:
+        parts.append("<h2>宣言の検証</h2>")
+        parts.append("<ul>")
+        for review in reviews:
+            ref = html.escape(str(review.get("ref", "")))
+            declaration = html.escape(str(review.get("declaration", ""))).replace(
+                "\n", " "
+            )
+            result = _REVIEW_LABELS.get(review.get("result", ""), str(review.get("result", "")))
+            line = f"{ref}「{declaration}」→ {html.escape(result)}"
+            note = str(review.get("note", "") or "")
+            if note:
+                line += f"：{html.escape(note)}"
+            parts.append(f"<li>{line}</li>")
+        parts.append("</ul>")
+
     return "\n".join(parts)
 
 

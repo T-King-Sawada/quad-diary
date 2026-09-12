@@ -41,9 +41,9 @@ def clock(monkeypatch):
     return c
 
 
-def make_reminder(time_str="09:00", submitted=False):
-    state = {"time": time_str, "submitted": submitted}
-    r = Reminder(lambda: state["time"], lambda: state["submitted"])
+def make_reminder(time_str="09:00", handled=False):
+    state = {"time": time_str, "handled": handled}
+    r = Reminder(lambda: state["time"], lambda: state["handled"])
     fires: list[str] = []
     r.fire.connect(lambda reason: fires.append(reason))
     return r, state, fires
@@ -91,10 +91,39 @@ def test_rearm_refires_after_time_change(clock):
     assert fires == ["reminder"]
 
 
-def test_rearm_no_fire_if_submitted(clock):
-    """既に本日分を保存済みなら rearm しても発火しない（催促しない）。"""
-    r, state, fires = make_reminder("09:00", submitted=True)
+def test_rearm_no_fire_if_already_handled(clock):
+    """既に本日の定刻リマインダーに応答済みなら rearm しても発火しない。"""
+    r, state, fires = make_reminder("09:00", handled=True)
     r.rearm()
+    assert fires == []
+
+
+def test_fires_even_if_something_was_already_saved_today(clock):
+    """★回帰テスト：昼に書いて保存しても、定刻リマインダーは出る。
+
+    以前は「本日1件でも保存済み＝発火しない」だったため、先に書いた日は
+    定刻の窓が出ず、その日の残りを書き損ねていた。
+    発火条件は「保存したか」ではなく「定刻リマインダーに応答したか」。
+    """
+    r, state, fires = make_reminder("09:00", handled=False)  # 保存の有無は問わない
+    r._tick()
+    assert fires == ["reminder"]
+
+
+def test_no_fire_after_responding_to_the_scheduled_window(clock):
+    """定刻の窓で保存（mark_done）したら、その日はもう出ない。"""
+    r, state, fires = make_reminder("09:00")
+    r._tick()
+    r.mark_done()
+    fires.clear()
+    r._tick()
+    assert fires == []
+
+
+def test_handled_in_another_session_stops_refiring(clock):
+    """★回帰テスト：別セッションで応答済みなら、再起動しても出ない。"""
+    r, state, fires = make_reminder("09:00", handled=True)
+    r._tick()
     assert fires == []
 
 

@@ -2,8 +2,18 @@
 
 判定ロジック（設計 8.3）:
     現在時刻 >= リマインダー時刻
-    かつ 本日未提出
+    かつ 本日まだ定刻リマインダーに応答していない
     かつ 本日まだ発火していない（または snooze 待ちが満了）
+
+「本日未提出」は条件に含めない
+------------------------------
+以前は「本日1件でも保存済みなら発火しない」としていたため、昼のうちに先に書いて
+保存すると 18:30 の窓が出ず、その日の残りを書き損ねる問題があった。
+定刻リマインダーは *その日に何を書いたかに関わらず* 1日1回出す。
+既に保存済みの日は、窓側で「追記しますか？」を確認する（F-103）。
+
+代わりの条件は「定刻リマインダーに応答したか」（is_handled_today）で、
+手動で開いて書いた／閉じたことは応答に含めない。
 """
 
 from __future__ import annotations
@@ -27,11 +37,12 @@ class Reminder(QObject):
     def __init__(
         self,
         get_reminder_time: Callable[[], str],
-        is_submitted_today: Callable[[], bool],
+        is_handled_today: Callable[[], bool],
     ):
         super().__init__()
         self._get_time = get_reminder_time
-        self._is_submitted = is_submitted_today
+        # 「本日の定刻リマインダーに応答済みか」（プロセスをまたいで残る事実）
+        self._is_handled = is_handled_today
 
         self._triggered_date: date | None = None   # 本日の定刻発火済み
         self._handled_date: date | None = None      # 本日は対応済み（保存 or 完了）
@@ -48,7 +59,11 @@ class Reminder(QObject):
 
     # --- 状態遷移（コントローラから呼ばれる） ---
     def mark_done(self) -> None:
-        """保存完了。本日はもう発火しない。"""
+        """定刻リマインダーに応答した。本日はもう発火しない。
+
+        呼ぶのは「リマインダー／再通知で開いた窓」で保存・完了したときだけ。
+        手動で開いて保存しただけでは呼ばない（定刻の窓は別に必要なため）。
+        """
         self._handled_date = date.today()
         self._snooze_until = None
 
@@ -99,8 +114,8 @@ class Reminder(QObject):
         if self._handled_date == today:
             return
 
-        if self._is_submitted():
-            # 既に本日分が保存済み（前回起動時など）
+        if self._is_handled():
+            # 別セッションで既に本日の定刻リマインダーに応答済み
             self._handled_date = today
             return
 

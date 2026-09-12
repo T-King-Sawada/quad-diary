@@ -6,6 +6,7 @@ from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import QApplication
 
+from app import storage
 from app.diary_dialog import DiaryDialog, _AutoJumpTextEdit
 
 
@@ -40,17 +41,156 @@ def test_update_mode_snooze_button_disabled():
     assert d._snooze_btn.isEnabled() is False
 
 
-def test_prepare_shows_yesterday_declaration():
-    d = DiaryDialog()
-    d.prepare(None, force=False, snooze_enabled=True, snooze_minutes=10, yesterday_declaration="早起きする")
-    assert d._yesterday_label.isHidden() is False
-    assert "早起きする" in d._yesterday_label.text()
+def _review(date_str, declaration, days=1, repeat=1):
+    return {
+        "date": date_str,
+        "declaration": declaration,
+        "review_at": date_str,
+        "days": days,
+        "repeat": repeat,
+    }
 
 
-def test_prepare_hides_yesterday_label_when_no_declaration():
+def test_prepare_shows_pending_declarations():
     d = DiaryDialog()
-    d.prepare(None, force=False, snooze_enabled=True, snooze_minutes=10, yesterday_declaration="")
-    assert d._yesterday_label.isHidden() is True
+    d.prepare(
+        None,
+        force=False,
+        snooze_enabled=True,
+        snooze_minutes=10,
+        reviews=[_review("2026-09-11", "早起きする")],
+    )
+    assert d._review_list.isHidden() is False
+    assert "早起きする" in d._review_list._rows[0]._label.text()
+
+
+def test_review_list_hidden_when_nothing_pending():
+    d = DiaryDialog()
+    d.prepare(None, force=False, snooze_enabled=True, snooze_minutes=10, reviews=[])
+    assert d._review_list.isHidden() is True
+
+
+def test_checking_a_declaration_records_done_and_opens_note():
+    d = DiaryDialog()
+    d.prepare(
+        None,
+        force=False,
+        snooze_enabled=True,
+        snooze_minutes=10,
+        reviews=[_review("2026-09-11", "早起きする")],
+    )
+    row = d._review_list._rows[0]
+    assert row._note.isVisible() is False   # 最初はテキスト欄を出さない（押す圧を作らない）
+
+    row._check.setChecked(True)
+
+    assert d.review_responses() == [
+        {"date": "2026-09-11", "result": "done", "note": ""}
+    ]
+    d.show()
+    QApplication.processEvents()
+    assert row._note.isVisible() is True    # チェック後に任意の一言欄が開く
+
+
+def test_note_is_optional_and_carried_when_written():
+    d = DiaryDialog()
+    d.prepare(
+        None,
+        force=False,
+        snooze_enabled=True,
+        snooze_minutes=10,
+        reviews=[_review("2026-09-11", "早起きする")],
+    )
+    row = d._review_list._rows[0]
+    row._check.setChecked(True)
+    row._note.setText("3日はできた")
+
+    assert d.review_responses()[0]["note"] == "3日はできた"
+
+
+def test_dropping_a_declaration_is_a_valid_exit():
+    """「もう降りる」も有効な結果。達成以外でもリストがゼロになること。"""
+    d = DiaryDialog()
+    d.prepare(
+        None,
+        force=False,
+        snooze_enabled=True,
+        snooze_minutes=10,
+        reviews=[_review("2026-09-11", "早起きする")],
+    )
+    row = d._review_list._rows[0]
+    row._set_result(storage.REVIEW_DROPPED)
+
+    assert d.review_responses() == [
+        {"date": "2026-09-11", "result": "dropped", "note": ""}
+    ]
+    assert row._check.isEnabled() is False
+
+
+def test_defer_keeps_declaration_pending():
+    d = DiaryDialog()
+    d.prepare(
+        None,
+        force=False,
+        snooze_enabled=True,
+        snooze_minutes=10,
+        reviews=[_review("2026-09-11", "早起きする")],
+    )
+    d._review_list._rows[0]._set_result(storage.REVIEW_PENDING)
+
+    assert d.review_responses()[0]["result"] == "pending"
+
+
+def test_only_three_declarations_are_visible_at_once():
+    """一度に出すのは最大3件。残りは「他N件」に畳む。"""
+    d = DiaryDialog()
+    reviews = [_review(f"2026-09-0{i}", f"宣言{i}") for i in range(1, 6)]
+    d.prepare(None, force=False, snooze_enabled=True, snooze_minutes=10, reviews=reviews)
+    d.show()
+    QApplication.processEvents()
+
+    visible = [row for row in d._review_list._rows if not row.isHidden()]
+    assert len(visible) == storage.MAX_VISIBLE_REVIEWS
+    assert d._review_list._more_btn.isVisible() is True
+    assert "他 2件" in d._review_list._more_btn.text()
+
+    d._review_list._reveal_rest()
+    QApplication.processEvents()
+    assert all(not row.isHidden() for row in d._review_list._rows)
+    assert d._review_list._more_btn.isVisible() is False
+
+
+def test_reviews_are_reset_between_openings():
+    d = DiaryDialog()
+    d.prepare(
+        None,
+        force=False,
+        snooze_enabled=True,
+        snooze_minutes=10,
+        reviews=[_review("2026-09-11", "早起きする")],
+    )
+    d._review_list._rows[0]._check.setChecked(True)
+    d.prepare(None, force=False, snooze_enabled=True, snooze_minutes=10, reviews=[])
+
+    assert d.review_responses() == []
+
+
+def test_force_mode_saves_with_a_single_line(monkeypatch):
+    """★回帰テスト：Forceモードでも1項目だけで保存できる（4行必須は撤去）。"""
+    d = DiaryDialog()
+    d.prepare({"fact": "1行だけ"}, force=True, snooze_enabled=True, snooze_minutes=10)
+    warnings = []
+    monkeypatch.setattr(
+        "app.diary_dialog.QMessageBox.warning",
+        lambda *args: warnings.append(args[2]),
+    )
+    saved = []
+    d.saved.connect(lambda: saved.append(True))
+
+    d._on_save()
+
+    assert warnings == []
+    assert saved == [True]
 
 
 def test_down_arrow_jumps_to_end_on_last_line():

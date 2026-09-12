@@ -8,7 +8,7 @@ Phase 1（本機 MVP）：トレイ常駐 / 定時リマインダー / 4 行入�
 from __future__ import annotations
 
 import sys
-from datetime import date, timedelta
+from datetime import datetime
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QSystemTrayIcon
@@ -19,6 +19,7 @@ from app import (
     config as config_mod,
     logger,
     providers as providers_mod,
+    state as state_mod,
     storage,
     updater,
 )
@@ -49,7 +50,10 @@ class AppController:
 
         self.reminder = Reminder(
             get_reminder_time=lambda: self.config.get("reminder_time", "18:30"),
-            is_submitted_today=lambda: storage.is_submitted(storage.today_str()),
+            # 「保存したか」ではなく「定刻リマインダーに応答したか」で判定する。
+            # 昼に手動で書いて保存しても、18:30 の窓は別に出す。
+            is_handled_today=lambda: state_mod.reminder_handled_on()
+            == storage.today_str(),
         )
         self.reminder.fire.connect(self.on_fire)
 
@@ -77,6 +81,10 @@ class AppController:
     def open_diary(self, reason: str) -> None:
         # 既に表示中、または確認ダイアログ表示中なら前面に出すだけ
         if self.diary.isVisible():
+            # 手動で開いたままの窓に定刻が来たら、以降はリマインダーの窓として扱う
+            # （そうしないと、この後のキャンセルが dismiss にならない）
+            if reason in ("reminder", "snooze"):
+                self._diary_reason = reason
             self.diary.bring_to_front()
             return
         if self._prompting:
@@ -85,23 +93,27 @@ class AppController:
         today = storage.today_str()
         existing = storage.get_entry(today)
 
-        yesterday = (date.today() - timedelta(days=1)).isoformat()
-        yesterday_entry = storage.get_entry(yesterday)
-        yesterday_declaration = (yesterday_entry or {}).get("declaration", "") or ""
+        # 未応答の宣言を再浮上させる（検証専用の通知は増やさない：既存の窓に相乗り）
+        try:
+            reviews = storage.due_declarations()
+        except OSError:
+            log.exception("検証待ちの宣言の読み込みに失敗しました（表示をスキップ）。")
+            reviews = []
 
-        # F-103：定刻発火で既に保存済みなら再編集確認
+        # F-103：定刻発火で既に保存済みなら追記するか確認
+        # （昼に書いていても定刻の窓は出す。その日の残りを書き足せるようにする）
         if reason == "reminder" and existing is not None:
             self._prompting = True
             try:
                 ans = QMessageBox.question(
                     None,
                     "確認",
-                    "今日の4行日記は既に保存されています。\n再編集しますか？",
+                    "今日の4行日記は保存済みです。\n追記しますか？",
                 )
             finally:
                 self._prompting = False
             if ans != QMessageBox.Yes:
-                self.reminder.mark_done()
+                self._mark_reminder_handled()
                 return
 
         mode = self.config.get("popup_mode", "normal")
@@ -115,35 +127,94 @@ class AppController:
             force=(mode == "force"),
             snooze_enabled=self.reminder.can_snooze(max_snooze),
             snooze_minutes=snooze_minutes,
-            yesterday_declaration=yesterday_declaration,
+            reviews=reviews,
         )
         self.diary.show()
         self.diary.bring_to_front()
 
     # 日記ウィンドウからのシグナル
     def _on_diary_saved(self) -> None:
-        self._save_entry(storage.today_str(), self.diary.values(), self._diary_existing)
+        today = storage.today_str()
+        reviews = self._apply_review_responses(today)
+        meta = {
+            "snooze_count": self.reminder.snooze_count(),
+            "written_at": datetime.now().strftime("%H:%M"),
+            "elapsed_sec": self.diary.elapsed_seconds(),
+            "opened_by": self._diary_reason,
+        }
+        self._save_entry(
+            today,
+            self.diary.values(),
+            self._diary_existing,
+            reviews=reviews,
+            meta=meta,
+            entries=self.diary.blocks(),
+        )
+
+    def _apply_review_responses(self, today: str) -> list[dict]:
+        """検証リストの応答を過去のエントリへ書き戻し、今日の記録用の要約を返す。"""
+        recorded: list[dict] = []
+        for response in self.diary.review_responses():
+            try:
+                summary = storage.respond_to_declaration(
+                    response["date"], response["result"], response["note"], today=today
+                )
+            except (OSError, ValueError):
+                log.exception("宣言への応答の保存に失敗しました: %s", response["date"])
+                continue
+            if summary is not None:
+                recorded.append(summary)
+        return recorded
 
     def _on_diary_snoozed(self, minutes: int) -> None:
         self.reminder.snooze(minutes)
         self.tray.notify("4行日記", f"{minutes}分後に再通知します。")
 
     def _on_diary_cancelled(self) -> None:
+        # キャンセルは永続化しない。未応答のまま再起動したら、その日のうちは
+        # もう一度出したほうが書き忘れを防げるため。
         if self._diary_reason in ("reminder", "snooze"):
             self.reminder.dismiss()
 
-    def _save_entry(self, today: str, values, existing) -> None:
+    def _mark_reminder_handled(self) -> None:
+        """本日の定刻リマインダーに応答した、として記録する（再起動しても残る）。"""
+        self.reminder.mark_done()
+        state_mod.set_reminder_handled(storage.today_str())
+
+    def _save_entry(
+        self,
+        today: str,
+        values,
+        existing,
+        reviews: list[dict] | None = None,
+        meta: dict | None = None,
+        entries: list[dict] | None = None,
+    ) -> None:
         fact, discovery, lesson, declaration = values
         sync_on = bool(providers_mod.enabled_providers(self.config))
         try:
             entry = storage.new_entry(
-                today, fact, discovery, lesson, declaration, existing=existing
+                today,
+                fact,
+                discovery,
+                lesson,
+                declaration,
+                existing=existing,
+                reviews=reviews,
+                meta=meta,
+                entries=entries,
             )
             # 同期有効なら pending、無効なら none（設計 12.2）
             entry["sync_status"] = "pending" if sync_on else "none"
             # まず本機保存（設計 6.4：先に本機、後で同期）
             storage.save_entry(entry)
-            self.reminder.mark_done()
+            # 同じ宣言を書き直した＝継続の意思表示。古い同一宣言は一覧から外す。
+            if declaration:
+                storage.supersede_declaration(declaration, exclude_date=today, today=today)
+            # 定刻リマインダーの窓で保存したときだけ「応答済み」にする。
+            # 手動で開いて書いただけなら、18:30 の窓はこの後も出す。
+            if self._diary_reason in ("reminder", "snooze"):
+                self._mark_reminder_handled()
             self.tray.notify("4行日記", "保存しました。")
         except OSError as e:
             log.exception("本機保存に失敗しました。")

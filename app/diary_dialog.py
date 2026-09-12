@@ -14,32 +14,56 @@ from __future__ import annotations
 
 import math
 import re
+import time
 from typing import Optional
 
 from PySide6.QtCore import QPointF, QRectF, QSize, QTimer, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractScrollArea,
+    QCheckBox,
     QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QMenu,
     QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
     QTextEdit,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
+from . import storage
+
 # 4 項目の定義（キー, ラベル, プレースホルダ）
+# ラベルは同期先の見出しにも使うので、素の名前のままにしておく。
 FIELDS = [
     ("fact", "事実", "今日実際に起きたこと"),
     ("discovery", "発見", "今日気づいたこと・注目したこと"),
     ("lesson", "教訓", "今日得た教訓"),
-    ("declaration", "宣言", "明日からの行動宣言"),
+    (
+        "declaration",
+        "宣言",
+        "明日やること。1つだけ。習慣にするかどうかは考えなくていい",
+    ),
 ]
+
+#: 入力画面でだけ「（任意）」を添える項目。必須は「少なくとも1項目」だけ。
+OPTIONAL_FIELDS = {"discovery", "lesson", "declaration"}
+
+# 追記ブロックの種別（キー, ラベル, プレースホルダ）
+# 4 行に収まらない日の受け皿。既定では入力欄を出さず、押したときだけ増える。
+BLOCK_TYPES = [
+    (storage.BLOCK_THOUGHT, "思考", "4行に収まらない考え"),
+    (storage.BLOCK_SEED, "タネ", "後で書きたいこと。一言でいい"),
+]
+BLOCK_LABELS = {key: label for key, label, _ in BLOCK_TYPES}
+BLOCK_PLACEHOLDERS = {key: placeholder for key, _, placeholder in BLOCK_TYPES}
 
 
 def _make_list_icon(numbered: bool, color: QColor) -> QIcon:
@@ -244,6 +268,248 @@ class _AutoJumpTextEdit(QTextEdit):
             self.height_changed.emit()
 
 
+class _ClickableLabel(QLabel):
+    """クリックで checkbox をトグルできる、折り返し対応の宣言ラベル。"""
+
+    clicked = Signal()
+
+    def __init__(self, text: str, parent=None):
+        super().__init__(text, parent)
+        self.setWordWrap(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self.isEnabled():
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
+
+
+class _ReviewRow(QWidget):
+    """未応答の宣言 1 件。チェックが主操作で、一言はチェック後に開く任意欄。"""
+
+    changed = Signal()
+
+    def __init__(self, item: dict, parent=None):
+        super().__init__(parent)
+        self._date: str = item["date"]
+        self._result: Optional[str] = None  # None / done / dropped / pending(=あとで)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 2, 0, 2)
+        outer.setSpacing(2)
+
+        row = QHBoxLayout()
+        row.setSpacing(6)
+
+        self._check = QCheckBox()
+        self._check.setToolTip("できた")
+        self._check.toggled.connect(self._on_toggled)
+
+        self._label = _ClickableLabel(item["declaration"])
+        self._label.clicked.connect(self._check.toggle)
+
+        # 経過日数は中立表示（警告色や記号は使わない）
+        self._meta = QLabel(self._meta_text(item))
+        self._meta.setStyleSheet("color: #71717a;")
+
+        self._menu_btn = QToolButton()
+        self._menu_btn.setText("⋯")
+        self._menu_btn.setAutoRaise(True)
+        self._menu_btn.setFocusPolicy(Qt.NoFocus)
+        self._menu_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        menu = QMenu(self._menu_btn)
+        menu.addAction("もう降りる", lambda: self._set_result(storage.REVIEW_DROPPED))
+        menu.addAction(
+            f"あとで（+{storage.DEFER_DAYS}日）",
+            lambda: self._set_result(storage.REVIEW_PENDING),
+        )
+        self._menu_btn.setMenu(menu)
+
+        row.addWidget(self._check, 0)
+        row.addWidget(self._label, 1)
+        row.addWidget(self._meta, 0)
+        row.addWidget(self._menu_btn, 0)
+        outer.addLayout(row)
+
+        self._note = QLineEdit()
+        self._note.setPlaceholderText("一言（任意・空でも保存できます）")
+        self._note.setVisible(False)
+        outer.addWidget(self._note)
+
+    @staticmethod
+    def _meta_text(item: dict) -> str:
+        month_day = item["date"][5:].replace("-", "/")
+        parts = [month_day]
+        days = item.get("days", 0)
+        if days > 0:
+            parts.append(f"{days}日前")
+        repeat = item.get("repeat", 1)
+        if repeat > 1:
+            parts.append(f"{repeat}回目")
+        return " ・ ".join(parts)
+
+    # ---- 操作 ----
+    def _on_toggled(self, checked: bool) -> None:
+        self._result = storage.REVIEW_DONE if checked else None
+        self._note.setVisible(checked)
+        if not checked:
+            self._note.clear()
+        self.changed.emit()
+
+    def _set_result(self, result: str) -> None:
+        """メニュー経由の確定（降りる／あとで）。行を淡くして操作を締める。"""
+        self._result = result
+        self._check.setEnabled(False)
+        self._label.setEnabled(False)
+        self._menu_btn.setEnabled(False)
+        self._note.setVisible(False)
+        self._note.clear()
+
+        font = self._label.font()
+        font.setStrikeOut(result == storage.REVIEW_DROPPED)
+        self._label.setFont(font)
+        self._label.setStyleSheet("color: #a1a1aa;")
+        self._meta.setText(
+            "降りた" if result == storage.REVIEW_DROPPED else f"+{storage.DEFER_DAYS}日"
+        )
+        self.changed.emit()
+
+    def response(self) -> Optional[dict]:
+        if self._result is None:
+            return None
+        return {
+            "date": self._date,
+            "result": self._result,
+            "note": self._note.text().strip(),
+        }
+
+
+class _ReviewList(QFrame):
+    """入力画面の先頭に出す「未応答の宣言」リスト。0 件なら自分を隠す。
+
+    設計上の要点:
+        - 追加の入力時間をゼロにする（読んで押すだけ。テキストは押した後の任意欄）
+        - 一度に出すのは最大 MAX_VISIBLE_REVIEWS 件。残りは「他N件」に畳む
+        - 出口が「できた」だけではないので、リストは必ずゼロに到達できる
+    """
+
+    changed = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("reviewList")
+        self.setStyleSheet(
+            "#reviewList { background-color: #fafafa; border: 1px solid #e4e4e7;"
+            " border-radius: 6px; }"
+        )
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(10, 8, 10, 8)
+        self._layout.setSpacing(2)
+
+        self._header = QLabel()
+        self._header.setStyleSheet("color: #52525b; font-weight: bold;")
+        self._layout.addWidget(self._header)
+
+        self._rows: list[_ReviewRow] = []
+        self._hidden_rows: list[_ReviewRow] = []
+        self._more_btn = QPushButton()
+        self._more_btn.setFlat(True)
+        self._more_btn.setFocusPolicy(Qt.NoFocus)
+        self._more_btn.setStyleSheet("color: #52525b; text-align: left;")
+        self._more_btn.setVisible(False)
+        self._more_btn.clicked.connect(self._reveal_rest)
+        self._layout.addWidget(self._more_btn)
+
+    def set_items(self, items: list[dict]) -> None:
+        for row in self._rows:
+            row.setParent(None)
+            row.deleteLater()
+        self._rows = []
+        self._hidden_rows = []
+
+        if not items:
+            self._more_btn.setVisible(False)
+            self.setVisible(False)
+            return
+
+        self._header.setText(f"宣言 {len(items)}件")
+        insert_at = self._layout.indexOf(self._more_btn)
+        for index, item in enumerate(items):
+            row = _ReviewRow(item)
+            row.changed.connect(self.changed)
+            self._layout.insertWidget(insert_at + index, row)
+            self._rows.append(row)
+            if index >= storage.MAX_VISIBLE_REVIEWS:
+                row.setVisible(False)
+                self._hidden_rows.append(row)
+
+        if self._hidden_rows:
+            self._more_btn.setText(f"他 {len(self._hidden_rows)}件 ▾")
+            self._more_btn.setVisible(True)
+        else:
+            self._more_btn.setVisible(False)
+
+        self.setVisible(True)
+
+    def _reveal_rest(self) -> None:
+        for row in self._hidden_rows:
+            row.setVisible(True)
+        self._hidden_rows = []
+        self._more_btn.setVisible(False)
+        self.changed.emit()
+
+    def responses(self) -> list[dict]:
+        return [r for r in (row.response() for row in self._rows) if r is not None]
+
+
+class _BlockRow(QWidget):
+    """追記ブロック 1 件（思考 / タネ）。空のまま保存すると捨てられる。"""
+
+    removed = Signal(object)
+    height_changed = Signal()
+
+    def __init__(self, kind: str, body: str = "", block_id: Optional[str] = None, parent=None):
+        super().__init__(parent)
+        self._kind = kind
+        self._id = block_id
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 2, 0, 2)
+        layout.setSpacing(2)
+
+        header = QHBoxLayout()
+        label = QLabel(BLOCK_LABELS.get(kind, kind))
+        label.setStyleSheet("color: #52525b;")
+        header.addWidget(label)
+        header.addStretch()
+
+        remove_btn = QToolButton()
+        remove_btn.setText("×")
+        remove_btn.setAutoRaise(True)
+        remove_btn.setFocusPolicy(Qt.NoFocus)
+        remove_btn.setToolTip("この追記を消す")
+        remove_btn.clicked.connect(lambda: self.removed.emit(self))
+        header.addWidget(remove_btn)
+        layout.addLayout(header)
+
+        self._edit = _AutoJumpTextEdit()
+        self._edit.setPlaceholderText(BLOCK_PLACEHOLDERS.get(kind, ""))
+        self._edit.setAcceptRichText(False)
+        self._edit.setTabChangesFocus(True)
+        self._edit.setPlainText(body)
+        self._edit.height_changed.connect(self.height_changed)
+        layout.addWidget(self._edit)
+
+    def focus(self) -> None:
+        self._edit.setFocus()
+
+    def value(self) -> dict:
+        block = {"type": self._kind, "body": self._edit.toPlainText().strip()}
+        if self._id:
+            block["id"] = self._id
+        return block
+
+
 class DiaryDialog(QDialog):
     saved = Signal()
     snoozed = Signal(int)
@@ -255,6 +521,7 @@ class DiaryDialog(QDialog):
         self._snooze_minutes = 10
         self._snooze_enabled = True
         self._allow_close = False  # アプリ終了時のみ True にして強制クローズを許可
+        self._opened_at: Optional[float] = None
         self._edits: dict[str, QTextEdit] = {}
         self._format_buttons: dict[str, tuple[QPushButton, QPushButton]] = {}
 
@@ -265,23 +532,20 @@ class DiaryDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
-        self._yesterday_label = QLabel()
-        self._yesterday_label.setWordWrap(True)
-        self._yesterday_label.setStyleSheet(
-            "color: #5c4400; background-color: #fff3cd; padding: 6px; border-radius: 4px;"
-        )
-        self._yesterday_label.setVisible(False)
+        # 未応答の宣言を最上部に再浮上させる（0 件なら自動で隠れる）
+        self._review_list = _ReviewList()
+        self._review_list.setVisible(False)
+        self._review_list.changed.connect(self._schedule_form_resize)
+        layout.addWidget(self._review_list)
 
         self._form_widget = QWidget()
         self._form_layout = QVBoxLayout(self._form_widget)
 
         for key, label, placeholder in FIELDS:
-            if key == "declaration":
-                # 「宣言」欄の直前に、昨日の宣言（=今日やるはずだったこと）を表示する
-                self._form_layout.addWidget(self._yesterday_label)
-
             header = QHBoxLayout()
-            header.addWidget(QLabel(label))
+            header.addWidget(
+                QLabel(f"{label}（任意）" if key in OPTIONAL_FIELDS else label)
+            )
             header.addStretch()
 
             edit = _AutoJumpTextEdit()
@@ -321,6 +585,28 @@ class DiaryDialog(QDialog):
             self._form_layout.addLayout(header)
             self._form_layout.addWidget(edit)
 
+        # --- 追記ブロック（任意）---
+        # 既定では入力欄を出さない。押したときだけ増えるので、空欄の圧が生まれない。
+        self._blocks: list[_BlockRow] = []
+        self._blocks_container = QWidget()
+        self._blocks_layout = QVBoxLayout(self._blocks_container)
+        self._blocks_layout.setContentsMargins(0, 0, 0, 0)
+        self._blocks_layout.setSpacing(2)
+        self._form_layout.addWidget(self._blocks_container)
+
+        add_row = QHBoxLayout()
+        add_row.setSpacing(6)
+        for kind, label, _placeholder in BLOCK_TYPES:
+            btn = QPushButton(f"＋ {label}")
+            btn.setFlat(True)
+            btn.setFocusPolicy(Qt.NoFocus)
+            btn.setStyleSheet("color: #52525b; text-align: left;")
+            btn.setToolTip(BLOCK_PLACEHOLDERS[kind])
+            btn.clicked.connect(lambda _checked=False, k=kind: self._add_block(k, focus=True))
+            add_row.addWidget(btn)
+        add_row.addStretch()
+        self._form_layout.addLayout(add_row)
+
         self._form_scroll = QScrollArea()
         self._form_scroll.setWidgetResizable(True)
         self._form_scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -359,18 +645,62 @@ class DiaryDialog(QDialog):
         force: bool,
         snooze_enabled: bool,
         snooze_minutes: int,
-        yesterday_declaration: str = "",
+        reviews: Optional[list[dict]] = None,
     ) -> None:
         self.update_mode(force, snooze_enabled, snooze_minutes)
         for key, _, _ in FIELDS:
             self._edits[key].setPlainText((existing or {}).get(key, "") or "")
+        self._review_list.set_items(reviews or [])
+        self._load_blocks((existing or {}).get("entries") or [])
+        self._opened_at = time.monotonic()
         self._schedule_form_resize()
 
-        if yesterday_declaration:
-            self._yesterday_label.setText(f"昨日の宣言：{yesterday_declaration}")
-            self._yesterday_label.setVisible(True)
-        else:
-            self._yesterday_label.setVisible(False)
+    # ---------------- 追記ブロック ----------------
+    def _load_blocks(self, blocks: list[dict]) -> None:
+        for row in list(self._blocks):
+            self._remove_block(row)
+        for block in blocks:
+            kind = block.get("type")
+            if kind in BLOCK_LABELS:
+                self._add_block(kind, body=block.get("body", ""), block_id=block.get("id"))
+
+    def _add_block(
+        self,
+        kind: str,
+        body: str = "",
+        block_id: Optional[str] = None,
+        focus: bool = False,
+    ) -> "_BlockRow":
+        row = _BlockRow(kind, body=body, block_id=block_id)
+        row.removed.connect(self._remove_block)
+        row.height_changed.connect(self._schedule_form_resize)
+        self._blocks_layout.addWidget(row)
+        self._blocks.append(row)
+        self._schedule_form_resize()
+        if focus:
+            row.focus()
+        return row
+
+    def _remove_block(self, row: "_BlockRow") -> None:
+        if row in self._blocks:
+            self._blocks.remove(row)
+        row.setParent(None)
+        row.deleteLater()
+        self._schedule_form_resize()
+
+    def blocks(self) -> list[dict]:
+        """追記ブロックの内容（空欄は保存側で捨てられる）。"""
+        return [row.value() for row in self._blocks]
+
+    def review_responses(self) -> list[dict]:
+        """検証リストで応答された宣言（date / result / note）を返す。"""
+        return self._review_list.responses()
+
+    def elapsed_seconds(self) -> int:
+        """画面を開いてから経過した秒数（meta の自己観測用）。"""
+        if self._opened_at is None:
+            return 0
+        return int(time.monotonic() - self._opened_at)
 
     def update_mode(self, force: bool, snooze_enabled: bool, snooze_minutes: int) -> None:
         """入力内容には触れず、モード（Force/normal）と再通知ボタンだけ更新する。
@@ -422,12 +752,15 @@ class DiaryDialog(QDialog):
     def _on_save(self) -> None:
         vals = self.values()
         meaningful = tuple(self._has_meaningful_content(value) for value in vals)
+        # 追記ブロックだけ書いた日も保存できる
+        meaningful += tuple(
+            self._has_meaningful_content(block["body"]) for block in self.blocks()
+        )
         if not any(meaningful):
             QMessageBox.warning(self, "確認", "少なくとも1項目は入力してください。")
             return
-        if self._force and not all(meaningful):
-            QMessageBox.warning(self, "確認", "Forceモードでは全項目の入力が必要です。")
-            return
+        # Force モードでも全項目は要求しない。1 行だけで保存できることが継続の前提。
+        # Force の意味は「未保存のまま黙って閉じさせない」（closeEvent 側）に限定する。
         self.saved.emit()
         self.hide()
 
