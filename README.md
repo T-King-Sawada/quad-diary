@@ -15,6 +15,19 @@ Python + PySide6 製。
 
 ---
 
+# インストール（exe で使う場合）
+
+1. [Releases](https://github.com/T-King-Sawada/quad-diary/releases/latest) から `QuadDiary-Setup.exe` をダウンロードして実行
+2. 「Windows によって PC が保護されました」と出たら **「詳細情報」→「実行」**
+   （コード署名をしていないため表示されます。ダウンロード元が上記 Releases であることを確認してください）
+3. インストール後、スタートメニューの「QuadDiary」から起動 → 初回設定ウィザード（[4.](#4-初回設定ウィザード)）
+
+- 管理者権限は不要です（`%LOCALAPPDATA%\Programs\QuadDiary` にインストール）。
+- 新しいバージョンはアプリが起動時に確認し、確認ダイアログの後に自動で更新します。
+- Python から動かす場合は以下の「使用説明」を参照してください。
+
+---
+
 # 使用説明
 
 ## 1. 動作環境
@@ -200,6 +213,8 @@ API Token は Windows **資格情報マネージャー**（エントリ名 `Dail
 | 同期が HTTP 403 | スコープ不足（write:page / read:page / read:space）またはページ権限不足 |
 | 同期が「同期失敗」 | 本機には保存済み。原因を直して「同期する」で再送 |
 | 詳細を調べたい | `logs/app.log` を確認、または `run_debug.bat` でコンソール起動 |
+| 旧 `QuadDiary.exe`（単体版）が「Could not create temporary directory」で起動しない | 単体版は `%TEMP%` への展開が必要なため環境によって失敗します。`QuadDiary-Setup.exe` でインストールし直してください（データは `%APPDATA%\QuadDiary` にあるのでそのまま引き継がれます）|
+| ログオン時に自動起動しない | 設定で「自動起動」を ON にしてアプリを一度起動すると、登録先が今の exe に書き直されます |
 
 ---
 
@@ -228,7 +243,8 @@ API Token は Windows **資格情報マネージャー**（エントリ名 `Dail
 │  ├─ icon.py               トレイアイコン描画
 │  ├─ paths.py              Portable パス解決
 │  └─ logger.py             ログ（logs/app.log）
-├─ data/  logs/  config*.json  requirements.txt  run*.bat
+├─ installer.iss            Inno Setup スクリプト（QuadDiary-Setup.exe）
+├─ data/  logs/  config*.json  requirements.txt  run*.bat  build.bat
 ```
 
 ## テスト
@@ -255,28 +271,48 @@ GUI（トレイ・ウィンドウ）は自動テスト対象外のため、手�
 多重起動防止により、`run.bat` を再実行しても新コードは読み込まれません。
 **必ずトレイ「終了」で完全終了してから起動し直してください。**
 
-## ビルド（配布用 .exe）
+## ビルド（配布用インストーラ）
 
 ```bat
-pip install pyinstaller   :: 初回のみ
-build.bat                 :: dist\QuadDiary.exe を生成
+pip install -r requirements-dev.txt   :: 初回のみ（pyinstaller 含む）
+build.bat                             :: dist\QuadDiary-Setup.exe を生成
 ```
 
-`build.bat` は `--noconsole --onefile`、keyring の Windows バックエンドを
-hidden-import で同梱します。
+前提：[Inno Setup 6](https://jrsoftware.org/isinfo.php) をインストールしておくこと。
 
-### 配布方法
+`build.bat` は次の 2 段階です。
 
-他PCへは次のフォルダ構成で渡します（`data/` `logs/` `config.json` は初回実行時に自動生成）。
+1. PyInstaller `--noconsole --onedir` → `dist\QuadDiary\`（`QuadDiary.exe` + `_internal\`）。
+   keyring の Windows バックエンドを hidden-import で同梱。
+2. Inno Setup（`installer.iss`）→ `dist\QuadDiary-Setup.exe`。バージョンは `app/__init__.py` の `__version__`。
 
-```
-QuadDiary/
-├─ QuadDiary.exe          ← dist から
-├─ config.default.json     ← 任意：管理者が接続先を事前設定する場合
-└─ README.md               ← 任意
-```
+> **なぜ onefile をやめたか**：onefile の exe は起動のたびに `%TEMP%` へ自己展開します。
+> セキュリティソフトや TEMP フォルダの権限・会社PCのポリシー次第で
+> 「Could not create temporary directory」となり起動できない環境があるため、
+> 展開不要の onedir をインストーラで配る方式にしました。
 
-利用者は `QuadDiary.exe` を実行 → 初回ウィザードで Email / API Token / Parent Page ID を入力。
+### 配布方法（GitHub Releases）
+
+1. `app/__init__.py` の `__version__` を上げて `build.bat`
+2. タグ `vX.Y.Z` でリリースを作り、**`dist\QuadDiary-Setup.exe` をアセットとして添付**
+   （アプリの自動更新はこのファイル名を探します）
+
+インストーラの挙動：
+
+- インストール先：`%LOCALAPPDATA%\Programs\QuadDiary`（ユーザー単位・管理者権限不要）
+- スタートメニューにショートカット（任意でデスクトップにも）
+- 自動更新時はサイレントで上書きインストールし、アプリを再起動
+- アンインストール：Windows の「設定 → アプリ」から。ログオン自動起動の登録も削除。
+  日記データ・設定（`%APPDATA%\QuadDiary`）は残します。
+- `QuadDiary-Setup.exe` と同じフォルダに `config.default.json` を置いてから実行すると、
+  インストール先へコピーされます（管理者が接続先を事前設定する場合）。
+
+利用者は `QuadDiary-Setup.exe` を実行 → 初回ウィザードで Email / API Token / Parent Page ID を入力。
+
+> **旧 onefile 版（v1.6.0 以前）の利用者**：アプリ内の自動更新は `QuadDiary.exe` という
+> アセットしか探さないため、Setup だけのリリースは検出されません。
+> `QuadDiary-Setup.exe` を手動で一度実行してもらえば、以降はインストール版として自動更新されます
+> （自動起動の登録先も初回起動時に新しい exe へ自動で書き換わります）。
 
 ## 開発ステータス
 

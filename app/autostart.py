@@ -39,16 +39,33 @@ def is_reliable() -> bool:
     return ("windowsapps" not in base) and ("pythonsoftwarefoundation" not in base)
 
 
-def is_enabled() -> bool:
+def registered_command() -> str | None:
+    """登録済みのコマンド文字列。未登録・取得失敗なら None。"""
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
-            winreg.QueryValueEx(key, APP_NAME)
-            return True
+            value, _ = winreg.QueryValueEx(key, APP_NAME)
+            return str(value)
     except FileNotFoundError:
-        return False
+        return None
     except OSError as e:
         log.warning("自動起動状態の取得に失敗: %s", e)
+        return None
+
+
+def is_enabled() -> bool:
+    return registered_command() is not None
+
+
+def needs_repair() -> bool:
+    """登録先が今の exe と違うか（exe の移動・インストール版への移行後など）。
+
+    frozen のときだけ True になり得る。スクリプト実行で登録を上書きして、
+    本番の exe の自動起動を奪わないようにするため。
+    """
+    if not getattr(sys, "frozen", False):
         return False
+    current = registered_command()
+    return current is not None and current.lower() != _command().lower()
 
 
 def enable() -> bool:

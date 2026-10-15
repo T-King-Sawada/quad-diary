@@ -327,8 +327,11 @@ class AppController:
         注意：起動時に自動で *無効化* はしない。さもないと、別の（autostart 無効な）
         config を持つインスタンスが起動しただけで登録が消えてしまう。
         無効化はユーザーが設定でチェックを外したときのみ行う。
+        登録先が古い exe のパスなら今の exe に書き直す（移動・インストール版への移行）。
         """
-        if self.config.get("autostart_enabled", False) and not autostart.is_enabled():
+        if not self.config.get("autostart_enabled", False):
+            return
+        if not autostart.is_enabled() or autostart.needs_repair():
             autostart.enable()
 
     # ---------------- 同期（手動リトライ） ----------------

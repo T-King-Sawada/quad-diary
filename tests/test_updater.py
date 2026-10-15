@@ -32,6 +32,7 @@ class FakeResp:
 
 def test_check_for_update_found(monkeypatch):
     monkeypatch.setattr(updater, "__version__", "1.2.0")
+    monkeypatch.setattr(updater, "is_onefile", lambda: True)   # exe 単体は onefile のみ
     payload = {
         "tag_name": "v1.3.0",
         "assets": [
@@ -93,6 +94,64 @@ def test_check_for_update_network_error(monkeypatch):
 
     monkeypatch.setattr(updater.requests, "get", boom)
     assert updater.check_for_update() is None   # 失敗時も None で握りつぶす
+
+
+def _payload_with(*names):
+    return {
+        "tag_name": "v9.0.0",
+        "assets": [
+            {"name": n, "browser_download_url": f"https://dl/{n}", "size": 10} for n in names
+        ],
+    }
+
+
+def test_check_for_update_prefers_setup(monkeypatch):
+    """Setup と exe が両方あれば、onefile でも Setup を選ぶ（インストール版へ移行）。"""
+    monkeypatch.setattr(updater, "is_onefile", lambda: True)
+    payload = _payload_with("QuadDiary.exe", "QuadDiary-Setup.exe")
+    monkeypatch.setattr(updater.requests, "get", lambda *a, **k: FakeResp(200, payload))
+    info = updater.check_for_update()
+    assert info is not None
+    assert info.is_setup is True
+    assert info.url == "https://dl/QuadDiary-Setup.exe"
+
+
+def test_check_for_update_onedir_ignores_bare_exe(monkeypatch):
+    """onedir（インストール版）は exe 単体では更新できないので None。"""
+    monkeypatch.setattr(updater, "is_onefile", lambda: False)
+    payload = _payload_with("QuadDiary.exe")
+    monkeypatch.setattr(updater.requests, "get", lambda *a, **k: FakeResp(200, payload))
+    assert updater.check_for_update() is None
+
+
+def test_check_for_update_onefile_falls_back_to_exe(monkeypatch):
+    monkeypatch.setattr(updater, "is_onefile", lambda: True)
+    payload = _payload_with("QuadDiary.exe")
+    monkeypatch.setattr(updater.requests, "get", lambda *a, **k: FakeResp(200, payload))
+    info = updater.check_for_update()
+    assert info is not None
+    assert info.is_setup is False
+
+
+def test_setup_script_runs_installer_silently(tmp_path):
+    exe = tmp_path / "QuadDiary.exe"
+    setup = tmp_path / "QuadDiary-Setup.exe"
+    bat = updater._setup_script(exe, setup, 1234)
+    text = bat.read_bytes().decode("utf-8")
+    assert f'"{setup}" /VERYSILENT' in text
+    assert 'PID eq 1234' in text
+    assert "move /y" not in text   # exe 単体の差し替えはしない
+    assert "\r\n" in text
+
+
+def test_apply_update_rejects_bare_exe_on_onedir(monkeypatch):
+    monkeypatch.setattr(updater, "can_self_update", lambda: True)
+    monkeypatch.setattr(updater, "is_onefile", lambda: False)
+    try:
+        updater.apply_update(updater.UpdateInfo(version="v9.0.0", url="x", is_setup=False))
+        assert False, "should raise"
+    except RuntimeError:
+        pass
 
 
 def test_apply_update_blocked_in_script_mode(monkeypatch):
